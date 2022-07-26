@@ -332,9 +332,6 @@ namespace SimpleSpritePacker
                 area += _packedTextures[i].Width * _packedTextures[i].Height;
 
             _filledArea = area / maxArea * 100f;
-
-            if (_sourceAtlas != null)
-                _textures.Clear();
         }
 
         /// <summary>
