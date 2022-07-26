@@ -63,13 +63,20 @@ namespace SimpleSpritePacker
             if (_outputTextures2D != null)
             {
                 float width = Mathf.Min(EditorGUIUtility.currentViewWidth, _outputTextures2D.width, 512);
-                float height = width * (_outputTextures2D.width / (float)_outputTextures2D.height);
+                float height = width * (_outputTextures2D.height / (float)_outputTextures2D.width);
+
+                if(height > 512)
+                {
+                    float ratio = Mathf.Max(width, height) / Mathf.Min(width, height);
+                    height = 512;
+                    width = 512 / ratio;
+                }
 
                 if (_outputTextures2D != null)
                 {
                     Shader shader = Shader.Find("Sprites/Default");
-                    EditorGUI.DrawRect(new Rect(position.width / 2 - width / 2f, 5, width, width), new Color(0, 0, 0, 0.25f));
-                    EditorGUI.DrawPreviewTexture(new Rect(position.width / 2 - width / 2f, 5, height, width), _outputTextures2D, new Material(shader));
+                    EditorGUI.DrawRect(new Rect(position.width / 2 - width / 2f, 5, width, height), new Color(0, 0, 0, 0.25f));
+                    EditorGUI.DrawPreviewTexture(new Rect(position.width / 2 - width / 2f, 5, width, height), _outputTextures2D, new Material(shader));
                 }
 
                 GUILayout.Space(height);
@@ -77,8 +84,8 @@ namespace SimpleSpritePacker
 
             TitleBar("Properties");
 
-            _width = EditorGUILayout.IntField("Width", _width);
-            _height = EditorGUILayout.IntField("Height", _height);
+            _width = EditorGUILayout.IntField("Width", Mathf.Clamp(_width, 1, 4096));
+            _height = EditorGUILayout.IntField("Height", Mathf.Clamp(_height, 1, 4096));
             _padding = EditorGUILayout.IntField("Padding", _padding);
 
             TitleBar("Conditions");
