@@ -1,10 +1,10 @@
-# SimpleSpritePacker (v1.0.0)
+# SimpleSpritePacker (v1.0.1)
 
-Sprite packer for Unity. 
+This is very simple tool for creating or editing sprite packers from the Unity's Editor. It also generates sprite rectangles for input textures like in Unity's Sprite Editor (splitting).
+When editing an existing multiple mod sprite, references to the existing subsprites will be preserved.
+Texture packing at runtime is also supported, but creating sprite rectangles is available only in editor.
 
-Simply create or edit sprite packers from the Unity's Editor.
-It also generates sprite rectangles for input textures.
-When editing an existing sprite atlas, references to the existing sprite rectangles will be preserved.
+Two algorithms are available for packing: FFDH and Binary which is better.
 
 ![alt text](https://github.com/SERRVIEX/SimpleSpritePacker/blob/main/github_assets/asset_0.png)
 
@@ -13,10 +13,10 @@ To open the Sprite Packer window, navigate to Unity's main menu and go to:
 ```Tools/Sprite Packer```
 
 ### Properties.
-Change the width and height of the output atlas and the padding between the sprites.
+Change the width and height of the output atlas and the spacing between the sprites.
 
 ```
-Important! Use 1px padding to avoid rendering issues.
+Important! Use 1px spacing to avoid rendering issues.
 ```
 
 ### Conditions.
@@ -41,7 +41,7 @@ Important! The sprite name will be the same as the texture name (with prefix).
 ```
 
 ### Actions.
-1. Process - pack in an atlas.
+1. Pack - pack in an atlas.
 2. Export - save output texture.
 
 ```

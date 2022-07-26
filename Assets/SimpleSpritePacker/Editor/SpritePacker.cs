@@ -8,11 +8,15 @@ namespace SimpleSpritePacker
     using UnityEditor;
     using UnityEditor.U2D.Sprites;
 
+    using Algorithms;
+    using Algorithms.BinaryTree;
+    using Algorithms.FirstFitDecreasingHeight;
+
     public class SpritePacker : EditorWindow
     {
         [SerializeField] private int _width = 1024;
         [SerializeField] private int _height = 1024;
-        [SerializeField] private int _padding = 1;
+        [SerializeField] private int _spacing = 1;
 
         [SerializeField] private Vector2Int _minSpriteSize;
         [SerializeField] private Vector2Int _maxSpriteSize = new Vector2Int(512, 512);
@@ -30,8 +34,12 @@ namespace SimpleSpritePacker
         [SerializeField, NonReorderable] private List<Texture2D> _textures = new List<Texture2D>();
         [SerializeField, NonReorderable] private List<SpriteMetadata> _replaceTextures = new List<SpriteMetadata>();
 
-        private List<TextureRect> _packedTextures = new List<TextureRect>();
-        private List<TextureRect> _unpackedTextures = new List<TextureRect>();
+        [SerializeField] private float _filledArea;
+
+        [SerializeField] private AlgorithmType _algorithmType = AlgorithmType.Binary;
+
+        private List<TextureNode> _packedTextures = new List<TextureNode>();
+        private List<TextureNode> _unpackedTextures = new List<TextureNode>();
 
         [SerializeField] private string _outputName = "sprite_pack";
         [SerializeField] private string _outputSpritesPrefixName = "";
@@ -62,7 +70,7 @@ namespace SimpleSpritePacker
             // Create preview.
             if (_outputTextures2D != null)
             {
-                float width = Mathf.Min(EditorGUIUtility.currentViewWidth, _outputTextures2D.width, 512);
+                float width = Mathf.Min(EditorGUIUtility.currentViewWidth - 50, _outputTextures2D.width, 512);
                 float height = width * (_outputTextures2D.height / (float)_outputTextures2D.width);
 
                 if(height > 512)
@@ -79,14 +87,16 @@ namespace SimpleSpritePacker
                     EditorGUI.DrawPreviewTexture(new Rect(position.width / 2 - width / 2f, 5, width, height), _outputTextures2D, new Material(shader));
                 }
 
-                GUILayout.Space(height);
+                GUILayout.Space(height + 20 * .75f);
             }
+
+            EditorGUILayout.LabelField($"Area Filled {_filledArea}%", new GUIStyle("helpBox"));
 
             TitleBar("Properties");
 
             _width = EditorGUILayout.IntField("Width", Mathf.Clamp(_width, 1, 4096));
             _height = EditorGUILayout.IntField("Height", Mathf.Clamp(_height, 1, 4096));
-            _padding = EditorGUILayout.IntField("Padding", _padding);
+            _spacing = EditorGUILayout.IntField("Spacing", _spacing);
 
             TitleBar("Conditions");
 
@@ -166,7 +176,7 @@ namespace SimpleSpritePacker
                         if (EditorUtility.DisplayDialog("Remove Sprite", "Are you sure? That action can't be undone!", "Remove"))
                         {
                             SpriteDataProviderUtils.Remove(spriteDataProvider, data.Name);
-                            Process();
+                            Pack();
                             Export();
 
                             GUI.color = Color.white;
@@ -196,16 +206,18 @@ namespace SimpleSpritePacker
 
             TitleBar("Actions");
 
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("_algorithmType"), true);
+
             GUI.color = Color.green;
 
-            if (GUILayout.Button("Process (FFDH Algorithm)"))
-                Process();
-            
+            if (GUILayout.Button("Pack"))
+                Pack();
+
+            GUI.color = Color.white;
+
             if (_outputTextures2D != null)
                 if (GUILayout.Button("Export"))
                     Export();
-
-            GUI.color = Color.white;
 
             if (_unpackedTextures.Count > 0)
             {
@@ -222,7 +234,7 @@ namespace SimpleSpritePacker
             GUI.changed = false;
         }
 
-        private ISpriteEditorDataProvider GetSpriteEditorDataProvider()
+        private ISpriteEditorDataProvider GetSpriteEditorDataProvider(Texture2D texture = null)
         {
             SpriteDataProviderFactories factory = new SpriteDataProviderFactories();
             factory.Init();
@@ -233,6 +245,11 @@ namespace SimpleSpritePacker
                 dataProvider = factory.GetSpriteEditorDataProviderFromObject(_sourceAtlas);
                 dataProvider.InitSpriteEditorDataProvider();
             }
+            else
+            {
+                dataProvider = factory.GetSpriteEditorDataProviderFromObject(texture);
+                dataProvider.InitSpriteEditorDataProvider();
+            }
 
             return dataProvider;
         }
@@ -240,7 +257,7 @@ namespace SimpleSpritePacker
         /// <summary>
         /// Pack into atlas.
         /// </summary>
-        private void Process()
+        private void Pack()
         {
             // Clear previous data.
             _packedTextures.Clear();
@@ -294,7 +311,30 @@ namespace SimpleSpritePacker
                 textures.Add(_textures[i]);
             }
 
-            _outputTextures2D = FFDH.Pack(_width, _height, _padding, textures, out _packedTextures, out _unpackedTextures);
+            switch (_algorithmType)
+            {
+                case AlgorithmType.FFDH:
+                    _outputTextures2D = FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
+                    break;
+
+                case AlgorithmType.Binary:
+                    _outputTextures2D = BinaryPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
+                    break;
+
+                default:
+                    _outputTextures2D = FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
+                    break;
+            }
+
+            float maxArea = _width * _height;
+            float area = 0;
+            for (int i = 0; i < _packedTextures.Count; i++)
+                area += _packedTextures[i].Width * _packedTextures[i].Height;
+
+            _filledArea = area / maxArea * 100f;
+
+            if (_sourceAtlas != null)
+                _textures.Clear();
         }
 
         /// <summary>
@@ -336,15 +376,17 @@ namespace SimpleSpritePacker
 
         private void Export()
         {
+            Pack();
+
             Texture2D exported = Generate();
             string path = AssetDatabase.GetAssetPath(exported);
-            
+            Debug.Log($"{path}");
             TextureImporter textureImporter = AssetImporter.GetAtPath(path) as TextureImporter;
             textureImporter.isReadable = true;
             textureImporter.spriteImportMode = SpriteImportMode.Multiple;
             textureImporter.SaveAndReimport();
 
-            ISpriteEditorDataProvider spriteDataProvider = GetSpriteEditorDataProvider();
+            ISpriteEditorDataProvider spriteDataProvider = GetSpriteEditorDataProvider(exported);
 
             string prefix = _outputSpritesPrefixName;
             if (_sourceAtlas != null)
@@ -418,7 +460,7 @@ namespace SimpleSpritePacker
 
                 File.WriteAllBytes(finalPath, _outputTextures2D.EncodeToPNG());
                 AssetDatabase.Refresh();
-                return Resources.Load<Texture2D>(_outputName);
+                return Resources.Load<Texture2D>(Path.GetFileNameWithoutExtension(finalPath));
             }
             else
             {
