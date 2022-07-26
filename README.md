@@ -1,7 +1,7 @@
 # SimpleSpritePacker (v1.0.1)
 
 This is very simple tool for creating or editing sprite packers from the Unity's Editor. It also generates sprite rectangles for input textures like in Unity's Sprite Editor (splitting).
-When editing an existing multiple mod sprite, references to the existing subsprites will be preserved.
+When editing an existing multiple mode sprite, references to the existing subsprites will be preserved.
 Texture packing at runtime is also supported, but creating sprite rectangles is available only in editor.
 
 Two algorithms are available for packing: FFDH and Binary which is better.
