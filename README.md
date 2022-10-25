@@ -1,4 +1,4 @@
-# SimpleSpritePacker (v1.0.1)
+# SimpleSpritePacker (v1.0.2)
 
 This is very simple tool for creating or editing sprite packers from the Unity's Editor. It also generates sprite rectangles for input textures like in Unity's Sprite Editor (splitting).
 When editing an existing multiple mode sprite, references to the existing subsprites will be preserved.
@@ -16,7 +16,7 @@ To open the Sprite Packer window, navigate to Unity's main menu and go to:
 Change the width and height of the output atlas and the spacing between the sprites.
 
 ```
-Important! Use 1px spacing to avoid rendering issues.
+Important! Use 2px spacing to avoid rendering issues.
 ```
 
 ### Conditions.

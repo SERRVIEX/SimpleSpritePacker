@@ -103,5 +103,40 @@ namespace SimpleSpritePacker
             // Apply the changes.
             dataProvider.Apply();
         }
+
+        public static SpriteRect GetSpriteRect(this ISpriteEditorDataProvider dataProvider, GUID id)
+        {
+            // Get all the existing Sprites.
+            var spriteRects = dataProvider.GetSpriteRects();
+
+            // Loop over all Sprites and get the sprite rect.
+            foreach (var spriteRect in spriteRects)
+                if (spriteRect.spriteID == id)
+                    return spriteRect;
+
+            return null;
+        }
+
+        public static void SetSpriteName(this ISpriteEditorDataProvider dataProvider, SpriteRect target, string name)
+        {
+            // Get all the existing Sprites.
+            var spriteRects = dataProvider.GetSpriteRects();
+
+            // Loop over all Sprites and update the name.
+            foreach (var spriteRect in spriteRects)
+            {
+                if (spriteRect.name == target.name)
+                {
+                    spriteRect.name = name;
+                    break;
+                }
+            }
+
+            // Write the updated data back to the data provider.
+            dataProvider.SetSpriteRects(spriteRects);
+
+            // Apply the changes.
+            dataProvider.Apply();
+        }
     }
 }
