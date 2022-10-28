@@ -172,10 +172,10 @@ namespace SimpleSpritePacker
 
             EditorGUILayout.PropertyField(_serializedObject.FindProperty("_sourceAtlas"), true);
 
-            EditorGUILayout.LabelField($"W: {_sourceAtlas.width} H: {_sourceAtlas.height}", new GUIStyle("helpBox"));
-
             if (_sourceAtlas != null)
             {
+                EditorGUILayout.LabelField($"W: {_sourceAtlas.width} H: {_sourceAtlas.height}", new GUIStyle("helpBox"));
+
                 EditorGUI.indentLevel += 2;
 
                 ISpriteEditorDataProvider spriteDataProvider = GetSpriteEditorDataProvider();
