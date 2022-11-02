@@ -1,4 +1,4 @@
-namespace SimpleSpritePacker
+﻿namespace SimpleSpritePacker
 {
     using System;
     using System.IO;
@@ -16,21 +16,42 @@ namespace SimpleSpritePacker
 
     public class SpritePacker : EditorWindow
     {
+        /// <summary>
+        /// Serialized object of this class.
+        /// </summary>
         private SerializedObject _serializedObject;
 
         [SerializeField] private float _filledArea;
 
+        /// <summary>
+        /// Atlas width.
+        /// </summary>
         [SerializeField] private int _width = 1024;
+
+        /// <summary>
+        /// Atlas height.
+        /// </summary>
         [SerializeField] private int _height = 1024;
+
+        /// <summary>
+        /// Spacing between sprites.
+        /// </summary>
         [SerializeField] private int _spacing = 2;
 
+        /// <summary>
+        /// Min sprite size required to pack it.
+        /// </summary>
         [SerializeField] private Vector2Int _minSpriteSize;
+
+        /// <summary>
+        /// Max sprite size required to pack it.
+        /// </summary>
         [SerializeField] private Vector2Int _maxSpriteSize = new Vector2Int(1024, 1024);
 
         /// <summary>
-        /// Optional.
         /// If reference is not null, then packing will
         /// override the referenced atlas instead of creating a new pack.
+        /// This is optional value.
         /// </summary>
         [SerializeField] private Texture2D _sourceAtlas;
 
@@ -38,22 +59,38 @@ namespace SimpleSpritePacker
         /// Textures which need to pack.
         /// </summary>
         [SerializeField, NonReorderable] private List<Texture2D> _textures = new List<Texture2D>();
-        [SerializeField, NonReorderable] private List<SpriteMetadata> _replaceTextures = new List<SpriteMetadata>();
+        [SerializeField, NonReorderable] private List<ReplacedTexture> _replacedTextures = new List<ReplacedTexture>();
 
         /// <summary>
         /// Which algorithm will be use for packing.
         /// </summary>
         [SerializeField] private AlgorithmType _algorithmType = AlgorithmType.Binary;
 
+        /// <summary>
+        /// List with textures thare were packed.
+        /// </summary>
         private List<TextureNode> _packedTextures = new List<TextureNode>();
+
+        /// <summary>
+        /// List with textures that were not packed due to size or lack of space
+        /// </summary>
         private List<TextureNode> _unpackedTextures = new List<TextureNode>();
 
         [SerializeField] private string _outputName = "sprite_pack";
         [SerializeField] private string _outputSpritesPrefixName = "";
-        private Texture2D _outputTextures2D;
+        private Texture2D _outputTexture;
+
+        private class AtlasTextureCache
+        {
+            public string Name;
+            public Sprite Sprite;
+            public Texture2D Texture;
+            public SpriteRect SpriteRect;
+        }
+
+        private List<AtlasTextureCache> atlasCache = new List<AtlasTextureCache>();
 
         private bool _areSpritesFoldout;
-        private Sprite[] _spritesForPreviews;
 
         // Cached values.
         private Shader _textureShader;
@@ -68,7 +105,7 @@ namespace SimpleSpritePacker
         {
             SpritePacker window = (SpritePacker)GetWindow(typeof(SpritePacker));
             window.Show();
-            window._outputTextures2D = new Texture2D(window._width, window._height);
+            window._outputTexture = new Texture2D(window._width, window._height);
             window.minSize = new Vector2(256, window.minSize.y);
             window.maxSize = new Vector2(512, window.maxSize.y);
         }
@@ -77,7 +114,6 @@ namespace SimpleSpritePacker
         {
             _textureShader = Shader.Find("Sprites/Default");
             _textureMaterial = new Material(_textureShader);
-
             _serializedObject = new SerializedObject(this);
         }
 
@@ -98,11 +134,6 @@ namespace SimpleSpritePacker
                 _outputName = EditorGUILayout.TextField("Name", _outputName);
                 _outputSpritesPrefixName = EditorGUILayout.TextField("Sprites Prefix", _outputSpritesPrefixName);
             }
-            else
-            {
-                if (_spritesForPreviews == null || _spritesForPreviews.Length == 0)
-                    CollectSpritesForPreview();
-            }
 
             SimpleEditor.Header("Actions");
 
@@ -115,7 +146,7 @@ namespace SimpleSpritePacker
 
             GUI.color = Color.white;
 
-            if (_outputTextures2D != null)
+            if (_outputTexture != null)
                 if (GUILayout.Button("Export"))
                     Export();
 
@@ -136,14 +167,14 @@ namespace SimpleSpritePacker
 
         private void DrawAtlasPreview()
         {
-            if (_outputTextures2D != null)
+            if (_outputTexture != null)
             {
-                (float width, float height) textureSize = GetTextureSize(_outputTextures2D.width, _outputTextures2D.height, EditorGUIUtility.currentViewWidth - 50, 512);
+                (float width, float height) textureSize = GetTextureSize(_outputTexture.width, _outputTexture.height, EditorGUIUtility.currentViewWidth - 50, 512);
 
-                if (_outputTextures2D != null)
+                if (_outputTexture != null)
                 {
                     EditorGUI.DrawRect(new Rect(position.width / 2 - textureSize.width / 2f, 5, textureSize.width, textureSize.height), new Color(0, 0, 0, 0.25f));
-                    EditorGUI.DrawPreviewTexture(new Rect(position.width / 2 - textureSize.width / 2f, 5, textureSize.width, textureSize.height), _outputTextures2D, _textureMaterial);
+                    EditorGUI.DrawPreviewTexture(new Rect(position.width / 2 - textureSize.width / 2f, 5, textureSize.width, textureSize.height), _outputTexture, _textureMaterial);
                 }
 
                 GUILayout.Space(textureSize.height + 20 * .75f);
@@ -170,7 +201,8 @@ namespace SimpleSpritePacker
         {
             SimpleEditor.Header("Inputs");
 
-            EditorGUILayout.PropertyField(_serializedObject.FindProperty("_sourceAtlas"), true);
+            SerializedProperty sourceAtlasProperty = _serializedObject.FindProperty("_sourceAtlas");
+            EditorGUILayout.PropertyField(sourceAtlasProperty, true);
 
             if (_sourceAtlas != null)
             {
@@ -183,12 +215,12 @@ namespace SimpleSpritePacker
 
                 // If data provider does not contains sprite that is
                 // defined in the replace array then remove it.
-                for (int i = _replaceTextures.Count - 1; i >= 0; i--)
+                for (int i = _replacedTextures.Count - 1; i >= 0; i--)
                 {
                     bool found = false;
                     for (int j = 0; j < spriteRects.Length; j++)
                     {
-                        if (_replaceTextures[i].Id == spriteRects[j].spriteID)
+                        if (_replacedTextures[i].Id == spriteRects[j].spriteID)
                         {
                             found = true;
                             break;
@@ -196,7 +228,7 @@ namespace SimpleSpritePacker
                     }
 
                     if (!found)
-                        _replaceTextures.RemoveAt(i);
+                        _replacedTextures.RemoveAt(i);
                 }
 
                 // If replace array does not contains sprite that is 
@@ -204,9 +236,9 @@ namespace SimpleSpritePacker
                 for (int i = 0; i < spriteRects.Length; i++)
                 {
                     bool found = false;
-                    for (int j = 0; j < _replaceTextures.Count; j++)
+                    for (int j = 0; j < _replacedTextures.Count; j++)
                     {
-                        if (spriteRects[i].spriteID == _replaceTextures[j].Id)
+                        if (spriteRects[i].spriteID == _replacedTextures[j].Id)
                         {
                             found = true;
                             break;
@@ -214,36 +246,59 @@ namespace SimpleSpritePacker
                     }
 
                     if (!found)
-                        _replaceTextures.Add(new SpriteMetadata(spriteRects[i].spriteID, spriteRects[i].name));
+                        _replacedTextures.Add(new ReplacedTexture(spriteRects[i].spriteID, spriteRects[i].name));
                 }
 
-                Func<string, Sprite> getSprite = value =>
+                if(atlasCache.Count != _replacedTextures.Count)
                 {
-                    for (int i = 0; i < _spritesForPreviews.Length; i++)
-                        if (_spritesForPreviews[i].name == value)
-                            return _spritesForPreviews[i];
-                    return null;
-                };
+                    atlasCache.Clear();
 
+                    string spriteSheet = AssetDatabase.GetAssetPath(_sourceAtlas);
+                    Sprite[] spritesForPreviews = AssetDatabase.LoadAllAssetsAtPath(spriteSheet).OfType<Sprite>().ToArray();
+
+                    Func<string, Sprite> getSprite = value =>
+                    {
+                        for (int i = 0; i < spritesForPreviews.Length; i++)
+                            if (spritesForPreviews[i].name == value)
+                                return spritesForPreviews[i];
+                        return null;
+                    };
+
+                    for (int i = 0; i < _replacedTextures.Count; i++)
+                    {
+                        ReplacedTexture spriteMetadata = _replacedTextures[i];
+                        SpriteRect spriteRect = spriteDataProvider.GetSpriteRect(spriteMetadata.Id);
+
+                        Sprite sprite = getSprite(spriteRect.name);
+  
+                        AtlasTextureCache pool = new AtlasTextureCache();
+                        pool.Sprite = sprite;
+                        pool.Texture = AssetPreview.GetAssetPreview(sprite);
+                        pool.SpriteRect = spriteRect;
+
+                        atlasCache.Add(pool);
+                    }
+                }
                 _areSpritesFoldout = EditorGUILayout.Foldout(_areSpritesFoldout, "Sprites");
                 if (_areSpritesFoldout)
                 {
-                    for (int i = 0; i < _replaceTextures.Count; i++)
+                    for (int i = 0; i < _replacedTextures.Count; i++)
                     {
-                        SpriteMetadata spriteMetadata = _replaceTextures[i];
-                        SpriteRect spriteRect = spriteDataProvider.GetSpriteRect(spriteMetadata.Id);
+                        ReplacedTexture spriteMetadata = _replacedTextures[i];
+                        SpriteRect spriteRect = atlasCache[i].SpriteRect;
 
                         EditorGUILayout.BeginHorizontal();
 
-                        Sprite sprite = getSprite(spriteRect.name);
                         var controlRect = EditorGUILayout.GetControlRect(true, GUILayout.MaxWidth(0));
-                        Texture2D texture = AssetPreview.GetAssetPreview(sprite);
                         EditorGUI.DrawRect(new Rect(controlRect.x, controlRect.y, 20, 20), new Color(0, 0, 0, 0.25f));
 
-                        if (texture != null)
+                        if (atlasCache[i].Texture == null)
+                            atlasCache[i].Texture = AssetPreview.GetAssetPreview(atlasCache[i].Sprite);
+
+                        if (atlasCache[i].Texture != null)
                         {
-                            (float w, float h) textureSize = GetTextureSize(texture.width, texture.height, 20, 20);
-                            EditorGUI.DrawPreviewTexture(new Rect(controlRect.x, controlRect.y, textureSize.w, textureSize.h), texture, _textureMaterial);
+                            (float w, float h) textureSize = GetTextureSize(atlasCache[i].Texture.width, atlasCache[i].Texture.height, 20, 20);
+                            EditorGUI.DrawPreviewTexture(new Rect(controlRect.x, controlRect.y, textureSize.w, textureSize.h), atlasCache[i].Texture, _textureMaterial);
                         }
 
                         spriteMetadata.Name = EditorGUILayout.TextField($"{spriteMetadata.Name}", GUILayout.MinWidth(80), GUILayout.MaxWidth(140), GUILayout.MinHeight(20));
@@ -270,9 +325,19 @@ namespace SimpleSpritePacker
 
                         spriteMetadata.ReplaceTexture2D = EditorGUILayout.ObjectField(spriteMetadata.ReplaceTexture2D, typeof(Texture2D), false, GUILayout.MinWidth(0)) as Texture2D;
 
+                        if (GUILayout.Button("E", GUILayout.MinWidth(20), GUILayout.MaxWidth(20)))
+                        {
+                            Texture2D texture = new Texture2D((int)spriteRect.rect.width, (int)spriteRect.rect.height, TextureFormat.ARGB32, false, true);
+                            texture.SetPixels(_sourceAtlas.GetPixels((int)spriteRect.rect.x, (int)spriteRect.rect.y, (int)spriteRect.rect.width, (int)spriteRect.rect.height));
+                            texture.Apply();
+                            texture.name = spriteMetadata.Name;
+
+                            WriteTexture(texture);
+                        }
+
                         GUI.color = Color.red;
 
-                        if (GUILayout.Button("X", GUILayout.MinWidth(20), GUILayout.MaxWidth(20)))
+                        if (GUILayout.Button("D", GUILayout.MinWidth(20), GUILayout.MaxWidth(20)))
                         {
                             if (EditorUtility.DisplayDialog("Remove Sprite", "Are you sure? That action can't be undone!", "Remove"))
                             {
@@ -286,11 +351,12 @@ namespace SimpleSpritePacker
                                 continue;
                             }
                         }
-
-                        GUI.color = Color.white;
+                       
                         EditorGUILayout.EndHorizontal();
 
-                        _replaceTextures[i] = spriteMetadata;
+                        GUI.color = Color.white;
+
+                        _replacedTextures[i] = spriteMetadata;
                     }
                 }
 
@@ -333,12 +399,6 @@ namespace SimpleSpritePacker
             }
 
             return (w, h);
-        }
-
-        private void CollectSpritesForPreview()
-        {
-            string spriteSheet = AssetDatabase.GetAssetPath(_sourceAtlas);
-            _spritesForPreviews = AssetDatabase.LoadAllAssetsAtPath(spriteSheet).OfType<Sprite>().ToArray();
         }
 
         /// <summary>
@@ -401,15 +461,15 @@ namespace SimpleSpritePacker
             switch (_algorithmType)
             {
                 case AlgorithmType.FFDH:
-                    _outputTextures2D = FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
+                    _outputTexture = FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
                     break;
 
                 case AlgorithmType.Binary:
-                    _outputTextures2D = BinaryPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
+                    _outputTexture = BinaryPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
                     break;
 
                 default:
-                    _outputTextures2D = FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
+                    _outputTexture = FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
                     break;
             }
 
@@ -420,7 +480,7 @@ namespace SimpleSpritePacker
 
             _filledArea = area / maxArea * 100f;
 
-            CollectSpritesForPreview();
+            atlasCache.Clear();
         }
 
         /// <summary>
@@ -465,11 +525,11 @@ namespace SimpleSpritePacker
         {
             texture2D = null;
 
-            for (int i = 0; i < _replaceTextures.Count; i++)
+            for (int i = 0; i < _replacedTextures.Count; i++)
             {
-                if (_replaceTextures[i].Name == name)
+                if (_replacedTextures[i].Name == name)
                 {
-                    texture2D = _replaceTextures[i].ReplaceTexture2D;
+                    texture2D = _replacedTextures[i].ReplaceTexture2D;
                     if (texture2D != null)
                         texture2D = CreateReadableTexture2D(texture2D);
 
@@ -480,13 +540,16 @@ namespace SimpleSpritePacker
             return false;
         }
 
+        /// <summary>
+        /// Export atlas.
+        /// </summary>
         private void Export()
         {
             Pack();
 
-            Texture2D exported = Generate();
+            Texture2D exported = WriteAtlas();
             string path = AssetDatabase.GetAssetPath(exported);
-            Debug.Log($"{path}");
+
             TextureImporter textureImporter = AssetImporter.GetAtPath(path) as TextureImporter;
             textureImporter.isReadable = true;
             textureImporter.spriteImportMode = SpriteImportMode.Multiple;
@@ -534,7 +597,7 @@ namespace SimpleSpritePacker
             var assetImporter = spriteDataProvider.targetObject as AssetImporter;
             assetImporter.SaveAndReimport();
 
-            _replaceTextures.Clear();
+            _replacedTextures.Clear();
 
             _packedTextures.Clear();
             _unpackedTextures.Clear();
@@ -542,16 +605,23 @@ namespace SimpleSpritePacker
             if(_sourceAtlas != null)
                 _textures.Clear();
 
+            atlasCache.Clear();
+
             GC.Collect();
 
             Debug.Log($"Exported at: {path}");
         }
 
-        private Texture2D Generate()
+        /// <summary>
+        /// Write atlas to the Resources.
+        /// </summary>
+        /// <returns></returns>
+        private Texture2D WriteAtlas()
         {
+            // If source atlas is null, then generate a new atlas.
             if (_sourceAtlas == null)
             {
-                string path = $"{Application.streamingAssetsPath.Replace("StreamingAssets", "Resources")}/{_outputName}";
+                string path = $"{Application.dataPath}/Resources/{_outputName}";
 
                 // Avoid overwrite.
                 string finalPath = path;
@@ -564,17 +634,42 @@ namespace SimpleSpritePacker
 
                 finalPath = $"{finalPath}.png";
 
-                File.WriteAllBytes(finalPath, _outputTextures2D.EncodeToPNG());
+                File.WriteAllBytes(finalPath, _outputTexture.EncodeToPNG());
                 AssetDatabase.Refresh();
                 return Resources.Load<Texture2D>(Path.GetFileNameWithoutExtension(finalPath));
             }
+            // Otherwise rewrite source atlas.
             else
             {
                 _textures.Clear();
-                File.WriteAllBytes(AssetDatabase.GetAssetPath(_sourceAtlas), _outputTextures2D.EncodeToPNG());
+                File.WriteAllBytes(AssetDatabase.GetAssetPath(_sourceAtlas), _outputTexture.EncodeToPNG());
                 AssetDatabase.Refresh();
                 return _sourceAtlas;
             }
+        }
+
+        /// <summary>
+        /// Write a texture from the atlas to the Resources.
+        /// </summary>
+        /// <param name="texture">Target texture.</param>
+        private void WriteTexture(Texture2D texture)
+        {
+            string path = $"{Application.dataPath}/Resources/{texture.name}";
+
+            // Avoid overwrite.
+            string finalPath = path;
+            int i = 0;
+            while (File.Exists($"{finalPath}.png"))
+            {
+                finalPath = $"{path} ({i})";
+                i++;
+            }
+
+            finalPath = $"{finalPath}.png";
+
+            File.WriteAllBytes(finalPath, texture.EncodeToPNG());
+
+            AssetDatabase.Refresh();
         }
     }
 }
