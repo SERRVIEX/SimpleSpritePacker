@@ -6,7 +6,7 @@ namespace SimpleSpritePacker
     using UnityEditor;
 
     [Serializable]
-    public struct ReplacedTexture
+    public struct SpriteMetadata
     {
         public GUID Id;
         public string Name;
@@ -14,14 +14,14 @@ namespace SimpleSpritePacker
 
         // Constructors
 
-        public ReplacedTexture(GUID id, string name)
+        public SpriteMetadata(GUID id, string name)
         {
             Id = id;
             Name = name;
             ReplaceTexture2D = null;
         }
 
-        public ReplacedTexture(GUID id, string name, Texture2D texture)
+        public SpriteMetadata(GUID id, string name, Texture2D texture)
         {
             Id = id;
             Name = name;
