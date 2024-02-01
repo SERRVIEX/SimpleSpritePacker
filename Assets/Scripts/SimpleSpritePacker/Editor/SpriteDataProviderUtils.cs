@@ -123,10 +123,8 @@ namespace SimpleSpritePacker
             var spriteRects = dataProvider.GetSpriteRects();
 
             // Loop over all Sprites and update the name.
-            for (int i = 0; i < spriteRects.Length; i++)
+            foreach (var spriteRect in spriteRects)
             {
-                SpriteRect spriteRect = spriteRects[i];
-                
                 if (spriteRect.name == target.name)
                 {
                     spriteRect.name = name;

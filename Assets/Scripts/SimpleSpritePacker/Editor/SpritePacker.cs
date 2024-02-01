@@ -3,6 +3,7 @@
     using System;
     using System.IO;
     using System.Linq;
+    using System.Text;
     using System.Collections.Generic;
 
     using UnityEngine;
@@ -26,15 +27,17 @@
         /// <summary>
         /// Atlas width.
         /// </summary>
-        [SerializeField] private int _width = 1024;
+        [SerializeField] private int _width = 2048;
 
         /// <summary>
         /// Atlas height.
         /// </summary>
-        [SerializeField] private int _height = 1024;
+        [SerializeField] private int _height = 2048;
+
+        [SerializeField] private bool _customSize;
 
         /// <summary>
-        /// Spacing between sprites.
+        /// Spacing between sprites (recommended 2).
         /// </summary>
         [SerializeField] private int _spacing = 2;
 
@@ -58,8 +61,8 @@
         /// <summary>
         /// Textures which need to pack.
         /// </summary>
-        [SerializeField, NonReorderable] private List<Texture2D> _newTextures = new List<Texture2D>();
-        [SerializeField, NonReorderable] private List<ReplacedTexture> _replacedTextures = new List<ReplacedTexture>();
+        [SerializeField] private List<Texture2D> _textures = new List<Texture2D>();
+        [SerializeField] private List<ReplacedTexture> _replacedTextures = new List<ReplacedTexture>();
 
         /// <summary>
         /// Which algorithm will be use for packing.
@@ -75,8 +78,7 @@
         /// List with textures that were not packed due to size or lack of space
         /// </summary>
         private List<TextureNode> _unpackedTextures = new List<TextureNode>();
-
-        private List<int> _selected = new List<int>();
+        private string _unpackedLog;
 
         [SerializeField] private string _outputName = "sprite_pack";
         [SerializeField] private string _outputSpritesPrefixName = "";
@@ -92,12 +94,13 @@
 
         private List<AtlasTextureCache> _atlasCache = new List<AtlasTextureCache>();
 
+        private bool _areSpritesFoldout;
+
         // Cached values.
         private Shader _textureShader;
         private Material _textureMaterial;
 
-        private Vector2 _mainScrollPosition;
-        private Vector2 _spritesScrollPosition;
+        private Vector2 _scrollPos;
 
         // Methods
 
@@ -120,23 +123,22 @@
 
         private void OnGUI()
         {
-            SimpleEditor.Initialize();
-
             EditorGUILayout.BeginVertical();
-            _mainScrollPosition = EditorGUILayout.BeginScrollView(_mainScrollPosition, GUILayout.Width(position.width), GUILayout.Height(position.height));
+            _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.Width(position.width), GUILayout.Height(position.height));
 
             DrawAtlasPreview();
             DrawMainProperties();
-            DrawInputs();
+            DrawSource();
+            DrawTextures();
 
             if (_sourceAtlas == null)
             {
-                SimpleEditor.Header("Export");
+                AdvancedGUI.Headline("Export");
                 _outputName = EditorGUILayout.TextField("Name", _outputName);
                 _outputSpritesPrefixName = EditorGUILayout.TextField("Sprites Prefix", _outputSpritesPrefixName);
             }
 
-            SimpleEditor.Header("Actions");
+            AdvancedGUI.Headline("Actions");
 
             EditorGUILayout.PropertyField(_serializedObject.FindProperty("_algorithmType"), true);
 
@@ -151,13 +153,30 @@
                 if (GUILayout.Button("Export"))
                     Export();
 
+            // Print in the inspector which textures have not been packed.
             if (_unpackedTextures.Count > 0)
             {
-                SimpleEditor.Header($"Not packed ({_unpackedTextures.Count} from {_newTextures.Count})");
+                AdvancedGUI.Headline($"Not packed ({_unpackedTextures.Count} from {_textures.Count})");
 
-                for (int i = 0; i < _unpackedTextures.Count; i++)
-                    GUILayout.Label($"{_unpackedTextures[i].Texture.name} - ({_unpackedTextures[i].Texture.width}x{_unpackedTextures[i].Texture.height})");
+                if (string.IsNullOrEmpty(_unpackedLog))
+                {
+                    StringBuilder builder = new StringBuilder();
+                    int count = _unpackedTextures.Count;
+                    int lastIndex = count - 1;
+                    for (int i = 0; i < count; i++)
+                    {
+                        builder.Append($"{_unpackedTextures[i].Texture.name} - ({_unpackedTextures[i].Texture.width}x{_unpackedTextures[i].Texture.height})");
+                        if (i != lastIndex)
+                            builder.Append("\n");
+                    }
+
+                    _unpackedLog = builder.ToString();
+                }
+
+                EditorGUILayout.LabelField(_unpackedLog, new GUIStyle("HelpBox"));
             }
+            else
+                _unpackedLog = string.Empty;
 
             EditorGUILayout.EndScrollView();
             EditorGUILayout.EndVertical();
@@ -181,248 +200,258 @@
                 GUILayout.Space(textureSize.height + 20 * .75f);
             }
 
+            GUI.color = Color.yellow;
             EditorGUILayout.LabelField($"Area Filled {_filledArea}%", new GUIStyle("helpBox"));
+            GUI.color = Color.white;
         }
 
         private void DrawMainProperties()
         {
-            SimpleEditor.Header("Properties");
+            AdvancedGUI.Headline("Properties");
 
-            _width = EditorGUILayout.IntField("Width", Mathf.Clamp(_width, 1, 4096));
-            _height = EditorGUILayout.IntField("Height", Mathf.Clamp(_height, 1, 4096));
+            // Start a code block to check for GUI changes.
+            EditorGUI.BeginChangeCheck();
+
+            if (_sourceAtlas == null)
+            {
+                _width = EditorGUILayout.IntField("Width", Mathf.Clamp(_width, 128, 4096));
+                _height = EditorGUILayout.IntField("Height", Mathf.Clamp(_height, 128, 4096));
+            }
+            else
+            {
+                _customSize = EditorGUILayout.Toggle("Custom Size", _customSize);
+                if (_customSize)
+                {
+                    _width = EditorGUILayout.IntField("Width", Mathf.Clamp(_width, 128, 4096));
+                    _height = EditorGUILayout.IntField("Height", Mathf.Clamp(_height, 128, 4096));
+                }
+                else
+                {
+                    _width = _sourceAtlas.width;
+                    _height = _sourceAtlas.height;
+                }
+            }
+
+            GUI.color = Color.white;
+
             _spacing = EditorGUILayout.IntField("Spacing", _spacing);
 
-            SimpleEditor.Header("Conditions");
+            AdvancedGUI.Headline("Conditions");
 
             _minSpriteSize = EditorGUILayout.Vector2IntField("Min Sprite Size", _minSpriteSize);
             _maxSpriteSize = EditorGUILayout.Vector2IntField("Max Sprite Size", _maxSpriteSize);
         }
-        
-        private void DrawInputs()
+
+        private void DrawSource()
         {
-            SimpleEditor.Header("Inputs");
+            AdvancedGUI.Headline("Source");
 
             SerializedProperty sourceAtlasProperty = _serializedObject.FindProperty("_sourceAtlas");
+
+            // Start a code block to check for GUI changes.
+            EditorGUI.BeginChangeCheck();
+
             EditorGUILayout.PropertyField(sourceAtlasProperty, true);
 
             if (_sourceAtlas != null)
             {
-                EditorGUILayout.LabelField($"W: {_sourceAtlas.width} H: {_sourceAtlas.height}", new GUIStyle("helpBox"));
-
-                ISpriteEditorDataProvider spriteDataProvider = GetSpriteEditorDataProvider();
-                SpriteRect[] spriteRects = spriteDataProvider.GetSpriteRects();
-
-                // If data provider does not contains sprite that is
-                // defined in the replace array then remove it.
-                for (int i = _replacedTextures.Count - 1; i >= 0; i--)
+                TextureImporter textureImporter = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(_sourceAtlas)) as TextureImporter;
+                if (textureImporter.spriteImportMode != SpriteImportMode.Multiple)
                 {
-                    bool found = false;
-                    for (int j = 0; j < spriteRects.Length; j++)
-                    {
-                        if (_replacedTextures[i].Id == spriteRects[j].spriteID)
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    if (!found)
-                        _replacedTextures.RemoveAt(i);
-                }
-
-                // If replace array does not contains sprite that is 
-                // defined in the data provider then add it.
-                for (int i = 0; i < spriteRects.Length; i++)
-                {
-                    bool found = false;
-                    for (int j = 0; j < _replacedTextures.Count; j++)
-                    {
-                        if (spriteRects[i].spriteID == _replacedTextures[j].Id)
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    if (!found)
-                        _replacedTextures.Add(new ReplacedTexture(spriteRects[i].spriteID, spriteRects[i].name));
-                }
-
-                if (_atlasCache.Count != _replacedTextures.Count)
-                {
-                    _atlasCache.Clear();
-
-                    string spriteSheet = AssetDatabase.GetAssetPath(_sourceAtlas);
-                    Sprite[] spritesForPreviews = AssetDatabase.LoadAllAssetsAtPath(spriteSheet).OfType<Sprite>().ToArray();
-
-                    Func<string, Sprite> getSprite = value =>
-                    {
-                        for (int i = 0; i < spritesForPreviews.Length; i++)
-                            if (spritesForPreviews[i].name == value)
-                                return spritesForPreviews[i];
-                        return null;
-                    };
-
-                    for (int i = 0; i < _replacedTextures.Count; i++)
-                    {
-                        ReplacedTexture spriteMetadata = _replacedTextures[i];
-                        SpriteRect spriteRect = spriteDataProvider.GetSpriteRect(spriteMetadata.Id);
-
-                        Sprite sprite = getSprite(spriteRect.name);
-
-                        AtlasTextureCache pool = new AtlasTextureCache();
-                        pool.Sprite = sprite;
-                        pool.Texture = AssetPreview.GetAssetPreview(sprite);
-                        pool.SpriteRect = spriteRect;
-
-                        _atlasCache.Add(pool);
-                    }
-                }
-
-                // Start the scroll view
-                _spritesScrollPosition = EditorGUILayout.BeginScrollView(_spritesScrollPosition, GUILayout.MinHeight(250), GUILayout.MaxHeight(250));
-                Rect scrollRect = new Rect(0, 0, position.width - 16, position.height - 16);
-
-                for (int i = 0; i < _replacedTextures.Count; i++)
-                {
-                    ReplacedTexture spriteMetadata = _replacedTextures[i];
-                    SpriteRect spriteRect = _atlasCache[i].SpriteRect;
-
-                    Rect itemRect = EditorGUILayout.BeginHorizontal();
-
-                    var controlRect = EditorGUILayout.GetControlRect(true, GUILayout.MaxWidth(0));
-                    if (itemRect.y - _spritesScrollPosition.y >= scrollRect.y && itemRect.y <= _spritesScrollPosition.y + 230)
-                    {
-                        if (_atlasCache[i].Texture == null)
-                            _atlasCache[i].Texture = AssetPreview.GetAssetPreview(_atlasCache[i].Sprite);
-
-                        if (_atlasCache[i].Texture != null)
-                        {
-                            (float w, float h) textureSize = GetTextureSize(_atlasCache[i].Texture.width, _atlasCache[i].Texture.height, 14, 14);
-                            EditorGUI.DrawPreviewTexture(new Rect(controlRect.x + 20, controlRect.y + 2, textureSize.w, textureSize.h), _atlasCache[i].Texture, _textureMaterial);
-                        }
-                    }
-
-                    bool selected = EditorGUILayout.Toggle(_selected.Contains(i), GUILayout.MaxWidth(16));
-
-                    if (selected && !_selected.Contains(i))
-                        _selected.Add(i);
-
-                    else if (!selected && _selected.Contains(i))
-                        _selected.Remove(i);
-
-                    EditorGUI.indentLevel += 1;
-
-                    if (spriteMetadata.Name != spriteRect.name)
-                    {
-                        spriteMetadata.Name = EditorGUILayout.TextField($"{spriteMetadata.Name}", GUILayout.MinWidth(80), GUILayout.MaxWidth(80), GUILayout.MinHeight(20));
-                        if (GUILayout.Button("Rename", GUILayout.MinWidth(72), GUILayout.MaxWidth(72)))
-                        {
-                            if (spriteDataProvider.Contains(spriteMetadata.Name))
-                            {
-                                if (EditorUtility.DisplayDialog("Rename Sprite", "The same name already exists!", "OK"))
-                                    spriteMetadata.Name = spriteRect.name;
-                            }
-                            else
-                            {
-                                spriteDataProvider.SetSpriteName(spriteRect, spriteMetadata.Name);
-                                var assetImporter = spriteDataProvider.targetObject as AssetImporter;
-                                assetImporter.SaveAndReimport();
-                                _atlasCache.Clear();
-                                EditorGUILayout.EndHorizontal();
-                                EditorGUILayout.EndScrollView();
-                                return;
-                            }
-                        }
-                    }
-                    else
-                        spriteMetadata.Name = EditorGUILayout.TextField($"{spriteMetadata.Name}", GUILayout.MinWidth(80), GUILayout.MaxWidth(80 + 75), GUILayout.MinHeight(20));
-
-                    EditorGUI.indentLevel -= 1;
-                    spriteMetadata.ReplaceTexture2D = EditorGUILayout.ObjectField(spriteMetadata.ReplaceTexture2D, typeof(Texture2D), false, GUILayout.MinWidth(0)) as Texture2D;
-                    EditorGUI.indentLevel += 1;
-
-                    if (GUILayout.Button("EXPORT", GUILayout.MinWidth(60), GUILayout.MaxWidth(60)))
-                    {
-                        Texture2D texture = new Texture2D((int)spriteRect.rect.width, (int)spriteRect.rect.height, TextureFormat.ARGB32, false, true);
-                        texture.SetPixels(_sourceAtlas.GetPixels((int)spriteRect.rect.x, (int)spriteRect.rect.y, (int)spriteRect.rect.width, (int)spriteRect.rect.height));
-                        texture.Apply();
-                        texture.name = spriteMetadata.Name;
-
-                        WriteTexture(texture);
-                    }
-
                     GUI.color = Color.red;
-
-                    if (GUILayout.Button("DELETE", GUILayout.MinWidth(55), GUILayout.MaxWidth(55)))
-                    {
-                        if (EditorUtility.DisplayDialog("Remove Sprite", "Are you sure? That action can't be undone!", "Delete"))
-                        {
-                            SpriteDataProviderUtils.Remove(spriteDataProvider, spriteRect.name);
-                            Pack();
-                            Export();
-
-                            GUI.color = Color.white;
-                            EditorGUILayout.EndHorizontal();
-                            i--;
-                            continue;
-                        }
-                    }
-
-                    EditorGUILayout.EndHorizontal();
-
+                    EditorGUILayout.LabelField($"Sprite import mode must be multiple.", new GUIStyle("helpBox"));
+                    GUI.color = Color.white;
+                }
+                else
+                {
+                    GUI.color = Color.green;
+                    EditorGUILayout.LabelField($"Width: {_sourceAtlas.width} Height: {_sourceAtlas.height}", new GUIStyle("helpBox"));
                     GUI.color = Color.white;
 
-                    _replacedTextures[i] = spriteMetadata;
-                    EditorGUI.indentLevel -= 1;
-                }
+                    ISpriteEditorDataProvider spriteDataProvider = GetSpriteEditorDataProvider();
+                    SpriteRect[] spriteRects = spriteDataProvider.GetSpriteRects();
 
-                EditorGUILayout.EndScrollView();
-
-                EditorGUILayout.BeginHorizontal();
-
-                GUI.color = Color.white;
-
-                if (GUILayout.Button("Export Selected"))
-                {
-                    _selected = _selected.OrderByDescending(v => v).ToList();
-                    for (int i = 0; i < _selected.Count; i++)
+                    // If data provider does not contains sprite that is
+                    // defined in the replace array then remove it.
+                    for (int i = _replacedTextures.Count - 1; i >= 0; i--)
                     {
-                        var spriteRect = _atlasCache[_selected[i]].SpriteRect;
-                        Texture2D texture = new Texture2D((int)spriteRect.rect.width, (int)spriteRect.rect.height, TextureFormat.ARGB32, false, true);
-                        texture.SetPixels(_sourceAtlas.GetPixels((int)spriteRect.rect.x, (int)spriteRect.rect.y, (int)spriteRect.rect.width, (int)spriteRect.rect.height));
-                        texture.Apply();
-                        texture.name = spriteRect.name;
-                        WriteTexture(texture);
-                    }
-                }
-
-                GUI.color = Color.red;
-
-                if (GUILayout.Button("Delete Selected"))
-                {
-                    if (EditorUtility.DisplayDialog("Remove Sprites", "Are you sure? That action can't be undone!", "Delete"))
-                    {
-                        _selected = _selected.OrderByDescending(v => v).ToList();
-                        for (int i = 0; i < _selected.Count; i++)
+                        bool found = false;
+                        for (int j = 0; j < spriteRects.Length; j++)
                         {
-                            var spriteRect = _atlasCache[_selected[i]].SpriteRect;
-                            SpriteDataProviderUtils.Remove(spriteDataProvider, spriteRect.name);
+                            if (_replacedTextures[i].Id == spriteRects[j].spriteID)
+                            {
+                                found = true;
+                                break;
+                            }
                         }
 
-                        Pack();
-                        Export();
+                        if (!found)
+                            _replacedTextures.RemoveAt(i);
+                    }
 
-                        _selected.Clear();
+                    // If replace array does not contains sprite that is 
+                    // defined in the data provider then add it.
+                    for (int i = 0; i < spriteRects.Length; i++)
+                    {
+                        bool found = false;
+                        for (int j = 0; j < _replacedTextures.Count; j++)
+                        {
+                            if (spriteRects[i].spriteID == _replacedTextures[j].Id)
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        if (!found)
+                            _replacedTextures.Add(new ReplacedTexture(spriteRects[i].spriteID, spriteRects[i].name));
+                    }
+
+                    // Optimize drawin sprites in the inspector.
+                    if (_atlasCache.Count != _replacedTextures.Count)
+                    {
+                        _atlasCache.Clear();
+
+                        string spriteSheet = AssetDatabase.GetAssetPath(_sourceAtlas);
+                        Sprite[] spritesForPreviews = AssetDatabase.LoadAllAssetsAtPath(spriteSheet).OfType<Sprite>().ToArray();
+
+                        Func<string, Sprite> getSprite = value =>
+                        {
+                            for (int i = 0; i < spritesForPreviews.Length; i++)
+                                if (spritesForPreviews[i].name == value)
+                                    return spritesForPreviews[i];
+                            return null;
+                        };
+
+                        for (int i = 0; i < _replacedTextures.Count; i++)
+                        {
+                            ReplacedTexture spriteMetadata = _replacedTextures[i];
+                            SpriteRect spriteRect = spriteDataProvider.GetSpriteRect(spriteMetadata.Id);
+
+                            Sprite sprite = getSprite(spriteRect.name);
+
+                            AtlasTextureCache pool = new AtlasTextureCache();
+                            pool.Sprite = sprite;
+                            pool.Texture = AssetPreview.GetAssetPreview(sprite);
+                            pool.SpriteRect = spriteRect;
+
+                            _atlasCache.Add(pool);
+                        }
+                    }
+
+                    _areSpritesFoldout = EditorGUILayout.Foldout(_areSpritesFoldout, "Included Sprites", EditorStyles.foldoutHeader);
+                    if (_areSpritesFoldout)
+                    {
+                        int previewWidth = 45;
+                        int previewHeight = 45;
+                        for (int i = 0; i < _replacedTextures.Count; i++)
+                        {
+                            ReplacedTexture spriteMetadata = _replacedTextures[i];
+                            SpriteRect spriteRect = _atlasCache[i].SpriteRect;
+
+                            GUILayout.BeginHorizontal();
+
+                            var controlRect = EditorGUILayout.GetControlRect(true, GUILayout.MaxWidth(0));
+                            EditorGUI.DrawRect(new Rect(controlRect.x, controlRect.y, previewWidth, previewWidth), new Color(0, 0, 0, 0.25f));
+
+                            if (_atlasCache[i].Texture == null)
+                                _atlasCache[i].Texture = AssetPreview.GetAssetPreview(_atlasCache[i].Sprite);
+
+                            if (_atlasCache[i].Texture != null)
+                            {
+                                (float w, float h) textureSize = GetTextureSize(_atlasCache[i].Texture.width, _atlasCache[i].Texture.height, previewWidth, previewHeight);
+                                EditorGUI.DrawPreviewTexture(new Rect(controlRect.x, controlRect.y, textureSize.w, textureSize.h), _atlasCache[i].Texture, _textureMaterial);
+                            }
+
+                            // Space after preview.
+                            GUILayout.Space(previewWidth);
+
+                            // Draw button rename if the name is changed.
+                            if (spriteMetadata.Name != spriteRect.name)
+                            {
+                                GUILayout.BeginVertical(GUILayout.Width(100));
+
+                                // Draw input for the name.
+                                spriteMetadata.Name = GUILayout.TextField($"{spriteMetadata.Name}", GUILayout.Width(100));
+                                // Draw button to perform rename action.
+                                if (GUILayout.Button("RENAME", GUILayout.Width(100)))
+                                {
+                                    if (spriteDataProvider.Contains(spriteMetadata.Name))
+                                    {
+                                        if (EditorUtility.DisplayDialog("Rename Sprite", "The same name already exists!", "OK"))
+                                            spriteMetadata.Name = spriteRect.name;
+                                    }
+                                    else
+                                    {
+                                        spriteDataProvider.SetSpriteName(spriteRect, spriteMetadata.Name);
+                                        spriteRect.name = spriteMetadata.Name;
+                                        var assetImporter = spriteDataProvider.targetObject as AssetImporter;
+                                        assetImporter.SaveAndReimport();
+                                    }
+                                }
+                                GUILayout.EndVertical();
+                            }
+                            else
+                                spriteMetadata.Name = GUILayout.TextField($"{spriteMetadata.Name}", GUILayout.Width(100));
+
+                            // Replace texture field.
+                            spriteMetadata.ReplaceTexture2D = EditorGUILayout.ObjectField(spriteMetadata.ReplaceTexture2D, typeof(Texture2D), false) as Texture2D;
+
+                            // Export and delete.
+                            GUILayout.BeginVertical();
+
+                            if (GUILayout.Button("EXPORT", GUILayout.Width(100)))
+                            {
+                                Texture2D texture = new Texture2D((int)spriteRect.rect.width, (int)spriteRect.rect.height, TextureFormat.ARGB32, false, true);
+                                texture.SetPixels(_sourceAtlas.GetPixels((int)spriteRect.rect.x, (int)spriteRect.rect.y, (int)spriteRect.rect.width, (int)spriteRect.rect.height));
+                                texture.Apply();
+                                texture.name = spriteMetadata.Name;
+
+                                WriteTexture(texture);
+                            }
+
+                            GUI.color = Color.red;
+
+                            if (GUILayout.Button("DELETE", GUILayout.Width(100)))
+                            {
+                                if (EditorUtility.DisplayDialog("Remove Sprite", "Are you sure? That action can't be undone!", "Delete"))
+                                {
+                                    SpriteDataProviderUtils.Remove(spriteDataProvider, spriteRect.name);
+                                    Pack();
+                                    Export();
+
+                                    GUI.color = Color.white;
+                                    GUILayout.EndVertical();
+                                    GUILayout.EndHorizontal();
+                                    i--;
+                                    continue;
+                                }
+                            }
+
+                            GUILayout.EndVertical();
+                            GUILayout.EndHorizontal();
+
+                            // Space between rows.
+                            GUILayout.Space(5);
+
+                            GUI.color = Color.white;
+
+                            _replacedTextures[i] = spriteMetadata;
+                        }
                     }
                 }
-
-                GUI.color = Color.white;
             }
+        }
 
-            EditorGUILayout.EndHorizontal();
+        private void DrawTextures()
+        {
+            AdvancedGUI.Headline("Textures");
 
-            EditorGUILayout.PropertyField(_serializedObject.FindProperty("_newTextures"), true);
+            GUI.color = Color.green;
+            EditorGUILayout.LabelField($"New textures that should be included.", new GUIStyle("helpBox"));
+            GUI.color = Color.white;
+
+            EditorGUILayout.PropertyField(_serializedObject.FindProperty("_textures"), true);
         }
 
         private ISpriteEditorDataProvider GetSpriteEditorDataProvider(Texture2D texture = null)
@@ -461,18 +490,17 @@
         }
 
         /// <summary>
-        /// Pack into atlas.
+        /// Pack into the atlas.
         /// </summary>
         private void Pack()
         {
             // Clear previous data.
             _packedTextures.Clear();
             _unpackedTextures.Clear();
-            _selected.Clear();
 
             List<Texture2D> textures = new List<Texture2D>();
 
-            // Get sprites metadata from atlas.
+            // Get sprites metadata from the atlas.
             if (_sourceAtlas != null)
             {
                 TextureImporter textureImporter = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(_sourceAtlas)) as TextureImporter;
@@ -508,30 +536,25 @@
             }
 
             // Skip textures that don't match properties.
-            for (int i = _newTextures.Count - 1; i >= 0; i--)
+            for (int i = _textures.Count - 1; i >= 0; i--)
             {
-                if (_newTextures[i].width > _maxSpriteSize.x || _newTextures[i].height > _maxSpriteSize.y ||
-                    _newTextures[i].width < _minSpriteSize.x || _newTextures[i].height < _minSpriteSize.y)
+                if (_textures[i] == null)
                     continue;
 
-                _newTextures[i] = CreateReadableTexture2D(_newTextures[i]);
-                textures.Add(_newTextures[i]);
+                if (_textures[i].width > _maxSpriteSize.x || _textures[i].height > _maxSpriteSize.y ||
+                    _textures[i].width < _minSpriteSize.x || _textures[i].height < _minSpriteSize.y)
+                    continue;
+
+                _textures[i] = CreateReadableTexture2D(_textures[i]);
+                textures.Add(_textures[i]);
             }
 
-            switch (_algorithmType)
+            _outputTexture = _algorithmType switch
             {
-                case AlgorithmType.FFDH:
-                    _outputTexture = FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
-                    break;
-
-                case AlgorithmType.Binary:
-                    _outputTexture = BinaryPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
-                    break;
-
-                default:
-                    _outputTexture = FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures);
-                    break;
-            }
+                AlgorithmType.FFDH => FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures),
+                AlgorithmType.Binary => BinaryPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures),
+                _ => FFDHPacking.Pack(_width, _height, _spacing, textures, out _packedTextures, out _unpackedTextures),
+            };
 
             float maxArea = _width * _height;
             float area = 0;
@@ -608,8 +631,8 @@
             Pack();
 
             Texture2D exported = WriteAtlas();
-            string path = AssetDatabase.GetAssetPath(exported);
 
+            string path = AssetDatabase.GetAssetPath(exported);
             TextureImporter textureImporter = AssetImporter.GetAtPath(path) as TextureImporter;
             textureImporter.isReadable = true;
             textureImporter.spriteImportMode = SpriteImportMode.Multiple;
@@ -620,6 +643,8 @@
             string prefix = _outputSpritesPrefixName;
             if (_sourceAtlas != null)
                 prefix = string.Empty;
+            else
+                _sourceAtlas = exported;
 
             // Help to detect duplicated names.
             List<string> verifiedNames = new List<string>();
@@ -661,10 +686,7 @@
 
             _packedTextures.Clear();
             _unpackedTextures.Clear();
-
-            if(_sourceAtlas != null)
-                _newTextures.Clear();
-
+            _textures.Clear();
             _atlasCache.Clear();
 
             GC.Collect();
@@ -675,7 +697,6 @@
         /// <summary>
         /// Write atlas to the Resources.
         /// </summary>
-        /// <returns></returns>
         private Texture2D WriteAtlas()
         {
             // If source atlas is null, then generate a new atlas.
@@ -696,12 +717,12 @@
 
                 File.WriteAllBytes(finalPath, _outputTexture.EncodeToPNG());
                 AssetDatabase.Refresh();
-                return Resources.Load<Texture2D>(Path.GetFileNameWithoutExtension(finalPath));
+                Texture2D texture2D = Resources.Load<Texture2D>(Path.GetFileNameWithoutExtension(finalPath));
+                return texture2D;
             }
-            // Otherwise rewrite source atlas.
+            // Otherwise rewrite the source atlas.
             else
             {
-                _newTextures.Clear();
                 File.WriteAllBytes(AssetDatabase.GetAssetPath(_sourceAtlas), _outputTexture.EncodeToPNG());
                 AssetDatabase.Refresh();
                 return _sourceAtlas;

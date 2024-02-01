@@ -6,7 +6,7 @@ namespace SimpleSpritePacker
     using UnityEditor;
 
     [Serializable]
-    public class ReplacedTexture
+    public struct ReplacedTexture
     {
         public GUID Id;
         public string Name;
